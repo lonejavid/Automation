@@ -3,10 +3,10 @@ HME CLOUD AUTOMATION
 Automatically logs into HMECloud and downloads Raw Car Data reports
 
 USAGE:
-    python3 hmecloud_automation.py
+    python3 -m automation.hmecloud
 
 Or import and use:
-    from hmecloud_automation import download_all_stores
+    from automation.hmecloud import download_all_stores
     download_all_stores()
 """
 
@@ -21,14 +21,17 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.keys import Keys
+from pathlib import Path
 
 # ========== CONFIGURATION ==========
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = BASE_DIR / "data"
+DOWNLOADS_FOLDER = str((DATA_DIR / "downloads").resolve())
+HME_STORES_FOLDER = str((DATA_DIR / "hme_stores").resolve())
+
 HME_CLOUD_URL = "https://hmecloud.com/"
 USERNAME = "doudit@hotmail.com"
 PASSWORD = "Kfcguy123!@#"
-
-DOWNLOADS_FOLDER = "/Users/sanctum/Desktop/Automation/downloads"
-HME_STORES_FOLDER = "/Users/sanctum/Desktop/Automation/hme_stores"
 
 # Store list from HMECloud
 STORES = [
@@ -691,6 +694,19 @@ def select_store_and_date(driver, store_name, report_date=None):
             print(f"      ✅ Download complete!")
             print(f"      📥 Excel file saved to downloads folder")
             
+            # Run DT macro on downloaded file
+            try:
+                from .run_macro import process_downloaded_file
+                print(f"\n      🔄 Running DT macro on downloaded file...")
+                macro_success = process_downloaded_file()
+                if macro_success:
+                    print(f"      ✅ File converted successfully!")
+                else:
+                    print(f"      ⚠️  Macro execution had issues, but file is downloaded")
+            except Exception as e:
+                print(f"      ⚠️  Could not run macro: {e}")
+                print(f"      📥 File downloaded but macro not executed")
+            
         except Exception as e:
             print(f"      ❌ Could not click View Report button: {e}")
             # Switch back to default content
@@ -737,6 +753,23 @@ def download_store_report(driver, store_name, report_date=None):
     
     print(f"\n   📥 Downloading: {store_name}")
     print(f"      Date: {report_date.strftime('%Y-%m-%d')}")
+    
+    downloads_dir = Path(DOWNLOADS_FOLDER)
+    if downloads_dir.exists():
+        existing_files = sorted(downloads_dir.glob("*.xlsx"))
+        if existing_files:
+            print("   📁 Existing export found in downloads folder")
+            try:
+                from .run_macro import process_downloaded_file
+                print("   🔄 Skipping new download and converting existing file...")
+                if process_downloaded_file(downloads_dir):
+                    print("   ✅ Existing file processed successfully")
+                    return True
+                else:
+                    print("   ⚠️  Existing file conversion failed; continuing with fresh download")
+            except Exception as e:
+                print(f"   ⚠️  Could not process existing file: {e}")
+                print("   🔁 Proceeding with fresh download")
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -824,6 +857,22 @@ def download_all_stores(stores=None, report_date=None, download_path=None):
     print(f"Stores to download: {len(stores)}")
     print(f"Download folder: {download_path}")
     print("="*80)
+    
+    downloads_dir = Path(DOWNLOADS_FOLDER)
+    existing_files = list(downloads_dir.glob("*.xlsx"))
+    if existing_files:
+        print("\n   📁 Existing export detected in downloads folder")
+        try:
+            from .run_macro import process_downloaded_file
+            print("   🔄 Skipping new download and converting existing file...")
+            if process_downloaded_file(downloads_dir):
+                print("   ✅ Existing file processed successfully")
+                return True
+            else:
+                print("   ⚠️  Existing file conversion failed; proceeding to download a fresh copy")
+        except Exception as e:
+            print(f"   ⚠️  Could not process existing file: {e}")
+            print("   🔁 Proceeding with fresh download")
     
     # Setup Chrome driver
     driver = setup_chrome_driver(download_path)

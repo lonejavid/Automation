@@ -4,6 +4,7 @@ Create sample Raw Car Data file for testing
 
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 
 # Create sample data matching HMECloud format
 data = []
@@ -52,11 +53,14 @@ for daypart_idx, daypart in enumerate(dayparts):
         
         data.append(row)
 
+OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "downloads"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 # Create DataFrame
 df = pd.DataFrame(data)
 
 # Save to Excel
-output_file = "/Users/sanctum/Desktop/Automation/downloads/Sample Raw Car Data - Mandela.xlsx"
+output_file = OUTPUT_DIR / "Sample Raw Car Data - Mandela.xlsx"
 df.to_excel(output_file, index=False, header=False)
 
 print(f"✅ Created sample file: {output_file}")

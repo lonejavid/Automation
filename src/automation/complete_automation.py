@@ -12,8 +12,9 @@ USAGE:
 import os
 import glob
 from datetime import datetime, timedelta
-from transform_data import transform_raw_car_data
-from template_operations import (
+from pathlib import Path
+from .transform_data import transform_raw_car_data
+from .template_operations import (
     create_backup,
     paste_to_template,
     concatenate_formulas,
@@ -23,8 +24,10 @@ from template_operations import (
 )
 
 # ========== CONFIGURATION ==========
-DOWNLOADS_FOLDER = "/Users/sanctum/Desktop/Automation/downloads"
-TEMPLATE_PATH = "/Users/sanctum/Desktop/Automation/templates/Drive Thru Optimization - KFC Guyana  (16-10)-copy.xlsx"
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = BASE_DIR / "data"
+DOWNLOADS_FOLDER = str((DATA_DIR / "downloads").resolve())
+TEMPLATE_PATH = str((DATA_DIR / "templates" / "Drive Thru Optimization - KFC Guyana  (16-10)-copy.xlsx").resolve())
 TARGET_SHEET = "AllStores"  # Or "Raw Data" - will auto-detect
 
 # Columns with formulas (yellow headers) - UPDATE these column numbers

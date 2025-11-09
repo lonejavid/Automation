@@ -16,14 +16,21 @@ This script does EVERYTHING:
 import os
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.append(str(SRC_DIR))
 
 # Import our automation modules
-from hmecloud_automation import download_all_stores
-from complete_automation import main as run_complete_automation
+from automation.hmecloud import download_all_stores
+from automation.complete_automation import main as run_complete_automation
 
 # ========== CONFIGURATION ==========
 DEFAULT_DATE = datetime.now() - timedelta(days=1)
-DOWNLOADS_FOLDER = "/Users/sanctum/Desktop/Automation/downloads"
+DATA_DIR = PROJECT_ROOT / "data"
+DOWNLOADS_FOLDER = str((DATA_DIR / "downloads").resolve())
 # ===================================
 
 

@@ -7,8 +7,16 @@ import streamlit as st
 from datetime import datetime, timedelta
 import time
 import threading
-from hmecloud_automation import download_all_stores, download_single_store
-from complete_automation import main as run_complete_automation
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.append(str(SRC_DIR))
+
+from automation.hmecloud import download_all_stores, download_single_store
+from automation.complete_automation import main as run_complete_automation
 
 # Page configuration
 st.set_page_config(

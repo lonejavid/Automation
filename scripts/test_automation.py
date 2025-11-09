@@ -2,7 +2,15 @@
 Quick test to demonstrate the HMECloud automation
 """
 
-from hmecloud_automation import setup_chrome_driver, login_to_hmecloud, navigate_to_reports
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.append(str(SRC_DIR))
+
+from automation.hmecloud import setup_chrome_driver, login_to_hmecloud, navigate_to_reports
 import time
 
 print("\n" + "="*80)

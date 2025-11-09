@@ -22,13 +22,13 @@
 ### One Command Does Everything:
 
 ```bash
-./run_automation.sh
+./scripts/run_automation.sh
 ```
 
 Or:
 
 ```bash
-python3 full_automation.py
+PYTHONPATH=src python3 scripts/full_automation.py
 ```
 
 **That's it!** The script will:
@@ -44,40 +44,40 @@ python3 full_automation.py
 
 ### Option 1: Easy Launcher (Recommended) ⭐
 
-```bash
-./run_automation.sh
+```
+./scripts/run_automation.sh
 ```
 
 Interactive menu with all options.
 
 ### Option 2: Full Automation
 
-```bash
-python3 full_automation.py
+```
+PYTHONPATH=src python3 scripts/full_automation.py
 ```
 
 Downloads from HMECloud + processes everything.
 
 ### Option 3: HMECloud Download Only
 
-```bash
-python3 hmecloud_automation.py
+```
+PYTHONPATH=src python3 -m automation.hmecloud
 ```
 
 Just download reports (interactive mode).
 
 ### Option 4: Process Existing Files
 
-```bash
-python3 complete_automation.py
+```
+PYTHONPATH=src python3 scripts/full_automation.py --skip-download
 ```
 
 If you already have downloaded files.
 
 ### Option 5: Web Interface
 
-```bash
-streamlit run app_integrated.py
+```
+streamlit run apps/app_integrated.py
 ```
 
 Beautiful web UI at http://localhost:8501
