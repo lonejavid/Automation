@@ -10,6 +10,150 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+DT_MACRO_CODE = """Sub DT()
+'
+' DT Macro
+'
+' Keyboard Shortcut: Ctrl+d
+'
+    Cells.Select
+    Selection.UnMerge
+    Range("B7").Select
+    ActiveCell.FormulaR1C1 = "Store Name"
+    Range("B4").Select
+    Selection.Copy
+    Range("B8").Select
+    ActiveSheet.Paste
+    Rows("1:6").Select
+    Range("A6").Activate
+    Application.CutCopyMode = False
+    Selection.Delete Shift:=xlUp
+    Range("B2").Select
+    Selection.AutoFill Destination:=Range("B2:B197")
+    Range("B2:B197").Select
+    Columns("D:D").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("E:F").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("G:G").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("I:I").ColumnWidth = 1.57
+    Columns("I:K").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("K:K").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("J:J").ColumnWidth = 4
+    Columns("J:J").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("B:B").ColumnWidth = 19.86
+    Columns("B:B").ColumnWidth = 33.29
+    Range("B6").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range("A197").Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range("A2:A197").Select
+    Range("A197").Activate
+    Selection.SpecialCells(xlCellTypeBlanks).Select
+    Selection.FormulaR1C1 = "=R[-1]C"
+    Columns("F:G").Delete Shift:=xlToLeft
+    Columns("J:K").Delete Shift:=xlToLeft
+End Sub"""
+
+
+def unblock_downloaded_file(excel_file_path):
+    """Remove the 'Mark of the Web' so Excel opens directly in edit mode (Windows)."""
+    if os.name != "nt":
+        return
+
+    try:
+        # Remove alternate data stream that triggers Protected View
+        safe_path = excel_file_path.replace('"', '`"')
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f'If (Test-Path -Path "{safe_path}") {{ Unblock-File -Path "{safe_path}" -ErrorAction SilentlyContinue }}'
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except Exception as e:
+        print(f"   ⚠️  Unable to unblock file automatically: {e}")
+
+    try:
+        os.chmod(excel_file_path, 0o666)
+    except Exception:
+        pass
+
+
+def ensure_excel_edit_mode(app):
+    """Set Excel automation security to allow macros and enable editing if opened in Protected View."""
+    try:
+        app.display_alerts = False
+    except Exception:
+        pass
+
+    try:
+        # msoAutomationSecurityLow = 1 allows macros to run
+        app.api.AutomationSecurity = 1
+    except Exception:
+        pass
+
+    try:
+        pv_windows = app.api.ProtectedViewWindows
+        if pv_windows.Count > 0:
+            print("   ⚠️  Excel opened in Protected View. Enabling editing...")
+            wb_com = pv_windows(1).Open()
+            return wb_com
+    except Exception:
+        pass
+
+    return None
+
+
+def ensure_dt_macro_present(wb):
+    """Ensure the DT macro exists in the workbook before running."""
+    try:
+        wb.macro("DT")
+        return True
+    except Exception:
+        pass
+
+    try:
+        vb_project = wb.api.VBProject
+    except Exception as e:
+        print("   ⚠️  Excel security prevented access to the VBA project.")
+        print("       Enable 'Trust access to the VBA project object model' in Excel Options to run the VBA macro.")
+        return False
+
+    try:
+        module = vb_project.VBComponents.Add(1)  # 1 = vbext_ct_StdModule
+        module.CodeModule.AddFromString(DT_MACRO_CODE)
+        print("   ℹ️  DT macro injected into workbook for this session.")
+        return True
+    except Exception as e:
+        print(f"   ⚠️  Unable to inject DT macro automatically: {e}")
+        return False
+
 def open_excel_file(excel_file_path):
     """Open the Excel workbook in the system's default spreadsheet application."""
     try:
@@ -34,7 +178,11 @@ def find_latest_downloaded_file(downloads_folder):
     Returns:
         Path to latest Excel file or None
     """
-    excel_files = glob.glob(os.path.join(downloads_folder, "*.xlsx"))
+    excel_files = [
+        path
+        for path in glob.glob(os.path.join(downloads_folder, "*.xlsx"))
+        if not Path(path).name.startswith("~$")
+    ]
     
     if not excel_files:
         return None
@@ -54,22 +202,61 @@ def run_dt_macro(excel_file_path):
     Returns:
         True if successful, False otherwise
     """
+    app = None
+    wb = None
     try:
         import xlwings as xw
         
         print(f"\n📝 Opening Excel file: {os.path.basename(excel_file_path)}")
+        unblock_downloaded_file(excel_file_path)
         
         # Open Excel file and keep the window visible for the user
         app = xw.App(visible=True)
-        wb = app.books.open(excel_file_path)
+        app.screen_updating = True
+        
+        wb_com_from_protected_view = ensure_excel_edit_mode(app)
+        if wb_com_from_protected_view is not None:
+            wb = xw.Book(wb_com_from_protected_view)
+        else:
+            try:
+                wb = app.books.open(excel_file_path, update_links=False, read_only=False)
+            except Exception as open_error:
+                print(f"   ⚠️  Excel refused to open the file directly ({open_error}). Retrying...")
+                wb_com_from_protected_view = ensure_excel_edit_mode(app)
+                if wb_com_from_protected_view is not None:
+                    wb = xw.Book(wb_com_from_protected_view)
+                else:
+                    raise
+            else:
+                # After opening, check whether Excel still placed the workbook in Protected View
+                pv_retry = ensure_excel_edit_mode(app)
+                if pv_retry is not None:
+                    wb = xw.Book(pv_retry)
+        
+        if not ensure_dt_macro_present(wb):
+            print("   ⚠️  Falling back to Python logic because VBA macro could not be executed.")
+            try:
+                wb.save()
+                wb.close()
+            except Exception:
+                pass
+            try:
+                app.quit()
+            except Exception:
+                pass
+            return run_dt_macro_python_logic(excel_file_path)
         
         print("   Running DT macro (Ctrl+D equivalent)...")
         
-        # Run the macro
         try:
-            app.api.Run("DT")
+            dt_macro = wb.macro("DT")
+            dt_macro()
             print("   ✅ Macro executed successfully")
-            wb.save()
+            try:
+                wb.save()
+            except Exception as save_error:
+                print(f"   ⚠️  Unable to save workbook automatically: {save_error}")
+                print("       Please save changes manually in Excel if needed.")
             # Keep workbook and Excel window open for the user
             print("   📂 Excel workbook left open for review")
             
@@ -81,12 +268,18 @@ def run_dt_macro(excel_file_path):
             print("="*80)
             return True
         except Exception as macro_error:
-            print(f"   ⚠️  Macro not found, replicating logic in Python...")
+            print(f"   ⚠️  Excel could not execute the DT macro: {macro_error}")
+            import traceback
+            traceback.print_exc()
             try:
+                wb.save()
                 wb.close()
-            except:
+            except Exception:
                 pass
-            app.quit()
+            try:
+                app.quit()
+            except Exception:
+                pass
             return run_dt_macro_python_logic(excel_file_path)
         
     except ImportError:
@@ -94,13 +287,17 @@ def run_dt_macro(excel_file_path):
         return run_dt_macro_python_logic(excel_file_path)
     except Exception as e:
         print(f"   ❌ Error running macro: {e}")
+        import traceback
+        traceback.print_exc()
         try:
-            wb.close()
-        except:
+            if wb:
+                wb.close()
+        except Exception:
             pass
         try:
-            app.quit()
-        except:
+            if app:
+                app.quit()
+        except Exception:
             pass
         return False
 

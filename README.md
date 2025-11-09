@@ -153,6 +153,19 @@ python3 full_automation.py
 
 ## 🔧 First Time Setup
 
+### For Windows (HP Laptop) - **See SETUP_GUIDE.md** 📖
+
+Complete step-by-step guide for setting up on a new Windows machine:
+- Installing Python
+- Installing dependencies
+- Setting up ChromeDriver
+- Configuring credentials
+- Testing the setup
+
+👉 **[Read the Full Setup Guide](SETUP_GUIDE.md)**
+
+### Quick Setup (macOS/Linux):
+
 ### 1. Install Dependencies:
 
 ```bash
@@ -162,7 +175,7 @@ pip3 install -r requirements.txt
 ### 2. Install ChromeDriver:
 
 ```bash
-brew install chromedriver
+brew install chromedriver  # macOS
 ```
 
 Or download from: https://chromedriver.chromium.org/
@@ -170,7 +183,7 @@ Or download from: https://chromedriver.chromium.org/
 ### 3. Run:
 
 ```bash
-python3 full_automation.py
+python3 scripts/full_automation.py
 ```
 
 ---
