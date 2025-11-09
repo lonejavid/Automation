@@ -7,8 +7,16 @@ import os
 import glob
 import sys
 import subprocess
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime
+
+ADDIN_MACRO_CANDIDATES = [
+    "DT",
+    "DTMacro.xlam!DT",
+    "PERSONAL.XLSB!DT",
+]
 
 DT_MACRO_CODE = """Sub DT()
 '
@@ -154,6 +162,76 @@ def ensure_dt_macro_present(wb):
         print(f"   ⚠️  Unable to inject DT macro automatically: {e}")
         return False
 
+
+def run_macro_via_addin(app, wb) -> bool:
+    """Attempt to execute the DT macro via a loaded add-in (preferred path)."""
+    try:
+        wb.activate()
+    except Exception:
+        pass
+
+    for macro_name in ADDIN_MACRO_CANDIDATES:
+        try:
+            app.api.Run(macro_name)
+            print(f"   ✅ Macro executed successfully via {macro_name}")
+            return True
+        except Exception:
+            continue
+
+    return False
+
+
+def run_macro_from_workbook(wb) -> bool:
+    """Execute the DT macro stored inside the active workbook."""
+    try:
+        wb.activate()
+    except Exception:
+        pass
+
+    try:
+        dt_macro = wb.macro("DT")
+    except Exception:
+        return False
+
+    dt_macro()
+    print("   ✅ Macro executed successfully (workbook module)")
+    return True
+
+
+def save_workbook_gracefully(wb, excel_file_path: str, app):
+    """Try to save the workbook without interrupting the automation.
+
+    Returns the workbook (possibly reopened) so the caller can keep Excel visible.
+    """
+    if wb is None:
+        return None
+
+    try:
+        wb.save()
+        return wb
+    except Exception as save_error:
+        message = str(save_error)
+        if "OSERROR: -50" in message:
+            print("   ⚠️  Excel could not save automatically (macOS OSERROR -50).")
+        else:
+            print(f"   ⚠️  Unable to save workbook automatically: {save_error}")
+
+        print("   ℹ️  Attempting to save a copy and restore the workbook automatically...")
+        temp_dir = Path(tempfile.mkdtemp(prefix="dtmacro_save_"))
+        temp_copy = temp_dir / Path(excel_file_path).name
+
+        try:
+            wb.impl.save(path=str(temp_copy), password=None)
+            wb.close(False)
+            shutil.copy2(temp_copy, excel_file_path)
+            print("   ✅ Saved changes by copying workbook back to original file.")
+            reopened = app.books.open(excel_file_path, update_links=False, read_only=False)
+            return reopened
+        except Exception as copy_error:
+            print(f"   ❌ Could not preserve changes automatically: {copy_error}")
+            print("       Please save manually in Excel (⌘+S) before closing.")
+            return wb
+
 def open_excel_file(excel_file_path):
     """Open the Excel workbook in the system's default spreadsheet application."""
     try:
@@ -233,54 +311,42 @@ def run_dt_macro(excel_file_path):
                 if pv_retry is not None:
                     wb = xw.Book(pv_retry)
         
-        if not ensure_dt_macro_present(wb):
-            print("   ⚠️  Falling back to Python logic because VBA macro could not be executed.")
-            try:
-                wb.save()
-                wb.close()
-            except Exception:
-                pass
-            try:
-                app.quit()
-            except Exception:
-                pass
-            return run_dt_macro_python_logic(excel_file_path)
-        
-        print("   Running DT macro (Ctrl+D equivalent)...")
-        
-        try:
-            dt_macro = wb.macro("DT")
-            dt_macro()
-            print("   ✅ Macro executed successfully")
-            try:
-                wb.save()
-            except Exception as save_error:
-                print(f"   ⚠️  Unable to save workbook automatically: {save_error}")
-                print("       Please save changes manually in Excel if needed.")
-            # Keep workbook and Excel window open for the user
+        # Preferred path: use the permanent add-in if it is installed.
+        if run_macro_via_addin(app, wb):
+            wb = save_workbook_gracefully(wb, excel_file_path, app)
             print("   📂 Excel workbook left open for review")
-            
-            print("\n" + "="*80)
+            print("\n" + "=" * 80)
             print("✅ FILE CONVERTED SUCCESSFULLY!")
-            print("="*80)
+            print("=" * 80)
             print(f"   📁 File: {os.path.basename(excel_file_path)}")
             print(f"   📍 Location: {excel_file_path}")
-            print("="*80)
+            print("=" * 80)
             return True
-        except Exception as macro_error:
-            print(f"   ⚠️  Excel could not execute the DT macro: {macro_error}")
-            import traceback
-            traceback.print_exc()
-            try:
-                wb.save()
+
+        print("   ℹ️  DT add-in not detected. Injecting macro into this workbook…")
+        if ensure_dt_macro_present(wb) and run_macro_from_workbook(wb):
+            wb = save_workbook_gracefully(wb, excel_file_path, app)
+            print("   📂 Excel workbook left open for review")
+            print("\n" + "=" * 80)
+            print("✅ FILE CONVERTED SUCCESSFULLY!")
+            print("=" * 80)
+            print(f"   📁 File: {os.path.basename(excel_file_path)}")
+            print(f"   📍 Location: {excel_file_path}")
+            print("=" * 80)
+            return True
+
+        print("   ⚠️  Could not run DT macro via Excel. Falling back to Python transformation.")
+        try:
+            if wb:
                 wb.close()
-            except Exception:
-                pass
-            try:
+        except Exception:
+            pass
+        try:
+            if app:
                 app.quit()
-            except Exception:
-                pass
-            return run_dt_macro_python_logic(excel_file_path)
+        except Exception:
+            pass
+        return run_dt_macro_python_logic(excel_file_path)
         
     except ImportError:
         print("   ⚠️  xlwings not installed. Replicating macro logic in Python...")

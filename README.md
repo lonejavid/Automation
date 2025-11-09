@@ -164,6 +164,21 @@ Complete step-by-step guide for setting up on a new Windows machine:
 
 👉 **[Read the Full Setup Guide](SETUP_GUIDE.md)**
 
+### Install the DT Macro Add-in (macOS users) 🧩
+
+The automation now expects the DT macro to live in a permanent Excel add-in. Install it once:
+
+```bash
+python3 scripts/install_macro_addin.py
+```
+
+Then enable it in Excel:
+- Open Excel ➜ Tools ➜ Excel Add-ins…
+- Check `DTMacro` (or click **Browse…** and select it if it isn’t listed)
+- Restart Excel if it was already running
+
+Test the macro anytime via Tools ➜ Macro ➜ `DT`.
+
 ### Quick Setup (macOS/Linux):
 
 ### 1. Install Dependencies:

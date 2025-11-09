@@ -1,0 +1,69 @@
+Sub DT()
+'
+' DT Macro
+'
+' Keyboard Shortcut: Ctrl+d
+'
+    Cells.Select
+    Selection.UnMerge
+    Range("B7").Select
+    ActiveCell.FormulaR1C1 = "Store Name"
+    Range("B4").Select
+    Selection.Copy
+    Range("B8").Select
+    ActiveSheet.Paste
+    Rows("1:6").Select
+    Range("A6").Activate
+    Application.CutCopyMode = False
+    Selection.Delete Shift:=xlUp
+    Range("B2").Select
+    Selection.AutoFill Destination:=Range("B2:B197")
+    Range("B2:B197").Select
+    Columns("D:D").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("E:F").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("G:G").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("I:I").ColumnWidth = 1.57
+    Columns("I:K").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("K:K").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("J:J").ColumnWidth = 4
+    Columns("J:J").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("B:B").ColumnWidth = 19.86
+    Columns("B:B").ColumnWidth = 33.29
+    Range("B6").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range("A197").Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range("A2:A197").Select
+    Range("A197").Activate
+    Selection.SpecialCells(xlCellTypeBlanks).Select
+    Selection.FormulaR1C1 = "=R[-1]C"
+    Columns("F:G").Delete Shift:=xlToLeft
+    Columns("J:K").Delete Shift:=xlToLeft
+End Sub
