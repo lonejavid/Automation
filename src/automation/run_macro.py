@@ -10,6 +10,78 @@ import subprocess
 import time
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict
+
+DT_MACRO_CODE = """Sub DT()
+'
+' DT Macro
+'
+' Keyboard Shortcut: Ctrl+d
+'
+    Cells.Select
+    Selection.UnMerge
+    Range("B7").Select
+    ActiveCell.FormulaR1C1 = "Store Name"
+    Range("B4").Select
+    Selection.Copy
+    Range("B8").Select
+    ActiveSheet.Paste
+    Rows("1:6").Select
+    Range("A6").Activate
+    Application.CutCopyMode = False
+    Selection.Delete Shift:=xlUp
+    Range("B2").Select
+    Selection.AutoFill Destination:=Range("B2:B197")
+    Range("B2:B197").Select
+    Columns("D:D").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("E:F").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("G:G").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("I:I").ColumnWidth = 1.57
+    Columns("I:K").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("K:K").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("J:J").ColumnWidth = 4
+    Columns("J:J").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("B:B").ColumnWidth = 19.86
+    Columns("B:B").ColumnWidth = 33.29
+    Range("B6").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range("A197").Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range(Selection, Selection.End(xlUp)).Select
+    Range("A2:A197").Select
+    Range("A197").Activate
+    Selection.SpecialCells(xlCellTypeBlanks).Select
+    Selection.FormulaR1C1 = "=R[-1]C"
+    Columns("F:G").Delete Shift:=xlToLeft
+    Columns("J:K").Delete Shift:=xlToLeft
+End Sub
+"""
 
 def open_excel_file(excel_file_path):
     """Open the Excel workbook in the system's default spreadsheet application."""
@@ -106,6 +178,53 @@ def find_latest_downloaded_file(downloads_folder, wait_for_download=True):
     return latest_file
 
 
+def inject_dt_macro(wb):
+    """
+    Inject the DT macro into the workbook if it is missing.
+
+    Requires Excel setting "Trust access to the VBA project object model".
+
+    Args:
+        wb: xlwings workbook object
+
+    Returns:
+        True if macro injected successfully, False otherwise.
+    """
+    try:
+        vbproject = wb.api.VBProject
+    except Exception as e:
+        print("   ❌ Excel blocked access to the VBA project.")
+        print("   💡 Enable 'Trust access to the VBA project object model' in Trust Center.")
+        print(f"   System message: {e}")
+        return False
+
+    try:
+        # Check if a module named ModuleDT already exists
+        module = None
+        for component in vbproject.VBComponents:
+            if component.Name.lower() == "moduledt" or component.Name.lower() == "dtmodule":
+                module = component
+                break
+
+        if module is None:
+            module = vbproject.VBComponents.Add(1)  # 1 = vbext_ct_StdModule
+            module.Name = "ModuleDT"
+
+        code_module = module.CodeModule
+        # Clear existing code
+        existing_lines = code_module.CountOfLines
+        if existing_lines > 0:
+            code_module.DeleteLines(1, existing_lines)
+
+        # Add DT macro code
+        code_module.AddFromString(DT_MACRO_CODE)
+        print("   ✅ DT macro injected into workbook")
+        return True
+    except Exception as e:
+        print(f"   ❌ Failed to inject DT macro: {e}")
+        return False
+
+
 def ensure_excel_edit_mode(wb):
     """
     Ensure Excel workbook is in edit mode (not Protected View)
@@ -121,6 +240,100 @@ def ensure_excel_edit_mode(wb):
             wb.api.Application.EnableEvents = True
     except:
         pass
+
+
+def run_dt_macro_excel_actions(excel_file_path):
+    """
+    Execute the DT macro steps using Excel automation via xlwings.
+    This does not require the DT VBA macro to be installed.
+    """
+    try:
+        import xlwings as xw
+    except ImportError:
+        print("   ⚠️  xlwings not installed for Excel actions fallback.")
+        return False
+
+    print("   🔄 Running DT transformations via Excel automation...")
+
+    app = xw.App(visible=True)
+    app.api.DisplayAlerts = False
+    app.api.ScreenUpdating = True
+    success = False
+
+    try:
+        wb = app.books.open(excel_file_path, read_only=False)
+        sht = wb.sheets[0]
+
+        # Step 1: Unmerge all cells
+        sht.cells.unmerge()
+
+        # Step 2: Prepare store name and header
+        store_name = sht["B4"].value
+        sht["B7"].value = "Store Name"
+
+        last_row = sht.range("A" + str(sht.cells.last_cell.row)).end("up").row
+        if store_name:
+            sht.range(f"B8:B{last_row}").value = store_name
+
+        # Step 3: Delete top rows
+        sht.range("1:6").api.Delete(Shift=-4159)  # xlShiftToLeft
+
+        # Step 4: Ensure column B is filled with store name
+        last_row = sht.range("B" + str(sht.cells.last_cell.row)).end("up").row
+        if store_name:
+            sht.range(f"B2:B{last_row}").value = store_name
+
+        # Step 5: Column deletions and adjustments (exact order from macro)
+        sht.range("D:D").api.Delete(Shift=-4159)
+        sht.range("E:F").api.Delete(Shift=-4159)
+        sht.range("G:G").api.Delete(Shift=-4159)
+        sht.range("I:I").column_width = 1.57
+        sht.range("I:K").api.Delete(Shift=-4159)
+        sht.range("K:K").api.Delete(Shift=-4159)
+        sht.range("J:J").column_width = 4
+        sht.range("J:J").api.Delete(Shift=-4159)
+        sht.range("B:B").column_width = 19.86
+        sht.range("B:B").column_width = 33.29
+
+        # Step 6: Fill blank dayparts using the value above
+        last_row = sht.range("A" + str(sht.cells.last_cell.row)).end("up").row
+        try:
+            sht.range(f"A2:A{last_row}").api.SpecialCells(4).FormulaR1C1 = "=R[-1]C"  # xlCellTypeBlanks = 4
+        except Exception:
+            pass
+
+        # Final column removals
+        sht.range("F:G").api.Delete(Shift=-4159)
+        sht.range("J:K").api.Delete(Shift=-4159)
+
+        # Save changes (Excel stays open for the user)
+        wb.save()
+        print("   ✅ Excel automation completed successfully")
+        print("   📂 Excel workbook left open for review")
+        print("\n" + "="*80)
+        print("✅ FILE CONVERTED SUCCESSFULLY!")
+        print("="*80)
+        print(f"   📁 File: {os.path.basename(excel_file_path)}")
+        print(f"   📍 Location: {excel_file_path}")
+        print("="*80)
+        success = True
+        return True
+    except Exception as e:
+        print(f"   ❌ Excel automation fallback failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        if not success:
+            try:
+                for wb in app.books:
+                    wb.close()
+            except Exception:
+                pass
+            try:
+                app.quit()
+            except Exception:
+                pass
 
 
 def run_dt_macro(excel_file_path):
@@ -182,6 +395,19 @@ def run_dt_macro(excel_file_path):
                 except:
                     pass
         
+        if not macro_success:
+            print("   ⚠️  Macro 'DT' not found in add-ins or workbook.")
+            print("   🔄 Attempting to inject DT macro into workbook...")
+            if inject_dt_macro(wb):
+                try:
+                    app.api.Run(f"'{wb.name}'!DT")
+                    print("   ✅ Macro executed successfully after injection")
+                    macro_success = True
+                except Exception as injected_run_error:
+                    print(f"   ❌ Could not run injected macro: {injected_run_error}")
+            else:
+                print("   ⚠️  Injection failed or blocked by Excel security.")
+
         if macro_success:
             try:
                 wb.save()
@@ -201,8 +427,17 @@ def run_dt_macro(excel_file_path):
             print("="*80)
             return True
         else:
-            print(f"   ⚠️  Macro 'DT' not found in add-ins or workbook")
-            print(f"   🔄 Replicating macro logic in Python...")
+            print("   ⚠️  DT macro could not be executed via Excel.")
+            print("   🔄 Trying Excel automation sequence as fallback...")
+            try:
+                wb.close()
+            except:
+                pass
+            app.quit()
+            excel_actions_success = run_dt_macro_excel_actions(excel_file_path)
+            if excel_actions_success:
+                return True
+            print("   🔄 Replicating macro logic in Python...")
             try:
                 wb.close()
             except:
@@ -243,6 +478,17 @@ def run_dt_macro_python_logic(excel_file_path, wb=None, ws=None):
             wb = load_workbook(excel_file_path)
             ws = wb.active
             should_close = True
+            try:
+                headers = [ws.cell(row=1, column=idx).value for idx in range(1, ws.max_column + 1)]
+                print(f"   🔍 Raw headers (row 1): {headers}")
+                for debug_row in range(1, 8):
+                    preview = [
+                        ws.cell(row=debug_row, column=col_idx).value
+                        for col_idx in range(1, min(ws.max_column, 12) + 1)
+                    ]
+                    print(f"   🔹 Raw row {debug_row}: {preview}")
+            except Exception:
+                pass
         
         print("   Replicating DT macro logic...")
         
@@ -263,54 +509,75 @@ def run_dt_macro_python_logic(excel_file_path, wb=None, ws=None):
         
         # Step 4: Delete rows 1-6
         ws.delete_rows(1, 6)
-        
-        # After deleting rows 1-6, what was B8 is now B2
-        # Fill B2:B191 with store name if empty
-        if store_name:
-            max_row = ws.max_row
-            for row in range(2, min(max_row + 1, 192)):
-                if ws[f'B{row}'].value is None:
-                    ws[f'B{row}'] = store_name
-        
-        # Step 5: Delete columns in reverse order to maintain indices
-        if ws.max_column >= 11:
-            ws.delete_cols(11, 1)  # Column K
-        if ws.max_column >= 10:
-            ws.delete_cols(10, 1)  # Column J
-        if ws.max_column >= 9:
-            ws.delete_cols(9, 1)   # Column I
-        if ws.max_column >= 7:
-            ws.delete_cols(7, 1)   # Column G
-        if ws.max_column >= 6:
-            ws.delete_cols(5, 2)   # Columns E-F
-        if ws.max_column >= 4:
-            ws.delete_cols(4, 1)   # Column D
-        
-        # Step 6: Set column widths
         try:
-            ws.column_dimensions['I'].width = 1.57
-        except:
+            headers_after_row_delete = [ws.cell(row=1, column=idx).value for idx in range(1, ws.max_column + 1)]
+            print(f"   🔍 Headers after row delete: {headers_after_row_delete}")
+        except Exception:
             pass
-        try:
-            ws.column_dimensions['J'].width = 4
-        except:
-            pass
-        ws.column_dimensions['B'].width = 33.29
         
-        # Step 7: Fill blank cells in column A with value above
+        # After deleting rows 1-6, ensure Store Name and Daypart columns are filled down
         max_row = ws.max_row
-        for row in range(2, max_row + 1):
-            cell_a = ws[f'A{row}']
-            if cell_a.value is None or cell_a.value == '':
-                cell_above = ws[f'A{row-1}']
-                if cell_above.value:
-                    cell_a.value = cell_above.value
+        if store_name:
+            for row in range(2, max_row + 1):
+                cell = ws.cell(row=row, column=2)
+                if cell.value in (None, ""):
+                    cell.value = store_name
         
-        # Step 8: Delete columns F-G and J-K (final cleanup)
-        if ws.max_column >= 7:
-            ws.delete_cols(6, 2)
-        if ws.max_column >= 11:
-            ws.delete_cols(10, 2)
+        for row in range(2, max_row + 1):
+            daypart_cell = ws.cell(row=row, column=1)
+            if daypart_cell.value in (None, ""):
+                daypart_cell.value = ws.cell(row=row - 1, column=1).value
+        
+        # Build header map to locate columns by header text
+        header_map = {}
+        for col_idx in range(1, ws.max_column + 1):
+            header_value = ws.cell(row=1, column=col_idx).value
+            if header_value is None:
+                continue
+            header_key = str(header_value).strip()
+            if header_key not in header_map:
+                header_map[header_key] = []
+            header_map[header_key].append(col_idx)
+        
+        desired_columns = [
+            ("Daypart", 1),
+            ("Store Name", 2),
+            ("Departure Time", 3),
+            ("Event Name", 5),
+            ("Cars in Queue", 8),
+            ("Cars In Order Queue", 9),
+            ("Cars In Order Point Stack", 11),
+            ("Menu Board", 12),
+            ("Greet", 16),
+            ("Service", 19),
+            ("Lane Queue", 20),
+            ("Lane Total", 23),
+            ("Lane Total 2", 24),
+        ]
+        
+        original_title = ws.title
+        formatted_ws = wb.create_sheet(title=f"{original_title}_formatted")
+        
+        for new_col_idx, (header, fallback_index) in enumerate(desired_columns, start=1):
+            source_col = None
+            if header in header_map and header_map[header]:
+                source_col = header_map[header].pop(0)
+            else:
+                source_col = fallback_index
+            
+            formatted_ws.cell(row=1, column=new_col_idx).value = header
+            for row_idx in range(2, max_row + 1):
+                formatted_ws.cell(row=row_idx, column=new_col_idx).value = ws.cell(
+                    row=row_idx, column=source_col
+                ).value
+        
+        # Replace old worksheet with new formatted version
+        wb.remove(ws)
+        formatted_ws.title = original_title
+        ws = formatted_ws
+        
+        # Set key column widths similar to macro output
+        ws.column_dimensions['B'].width = 33.29
         
         # Save changes
         wb.save(excel_file_path)
