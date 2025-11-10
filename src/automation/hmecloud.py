@@ -694,18 +694,27 @@ def select_store_and_date(driver, store_name, report_date=None):
             print(f"      ✅ Download complete!")
             print(f"      📥 Excel file saved to downloads folder")
             
-            # Run DT macro on downloaded file
+            # Run DT macro on downloaded file AUTOMATICALLY
+            # This ensures every downloaded file gets the macro applied
+            print(f"\n      " + "="*70)
+            print(f"      🔄 AUTOMATICALLY RUNNING DT MACRO ON DOWNLOADED FILE")
+            print(f"      " + "="*70)
             try:
                 from .run_macro import process_downloaded_file
-                print(f"\n      🔄 Running DT macro on downloaded file...")
-                macro_success = process_downloaded_file()
+                # Wait for file to finish downloading, then run macro
+                macro_success = process_downloaded_file(wait_for_download=True)
                 if macro_success:
-                    print(f"      ✅ File converted successfully!")
+                    print(f"\n      ✅✅✅ FILE DOWNLOADED AND CONVERTED SUCCESSFULLY! ✅✅✅")
                 else:
-                    print(f"      ⚠️  Macro execution had issues, but file is downloaded")
+                    print(f"\n      ⚠️  WARNING: File downloaded but macro execution failed")
+                    print(f"      💡 The file is in the downloads folder but needs manual macro execution")
+                    print(f"      📁 Check the downloads folder for the file")
             except Exception as e:
-                print(f"      ⚠️  Could not run macro: {e}")
-                print(f"      📥 File downloaded but macro not executed")
+                print(f"\n      ❌ ERROR: Could not run macro automatically: {e}")
+                import traceback
+                traceback.print_exc()
+                print(f"      📥 File was downloaded successfully but macro must be run manually")
+                print(f"      📁 File location: {DOWNLOADS_FOLDER}")
             
         except Exception as e:
             print(f"      ❌ Could not click View Report button: {e}")
@@ -772,7 +781,7 @@ def download_store_report(driver, store_name, report_date=None):
                 print("   🔁 Proceeding with fresh download")
     
     try:
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 60)
         
         # Select store and date
         if not select_store_and_date(driver, store_name, report_date):
