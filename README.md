@@ -19,24 +19,31 @@
 
 ## 🚀 Super Quick Start
 
-### One Command Does Everything:
+### Option 1: Web Interface (Easiest) ⭐
+
+Launch the user-friendly web interface:
 
 ```bash
-./scripts/run_automation.sh
+streamlit run app.py
 ```
 
-Or:
+Then open your browser to `http://localhost:8501` and click **"Start Automation"** button.
+
+The automation will open in a separate browser window and run automatically!
+
+---
+
+### Option 2: Command Line
 
 ```bash
-PYTHONPATH=src python3 scripts/full_automation.py
+PYTHONPATH=src python3 scripts/test_store_selection.py
 ```
 
 **That's it!** The script will:
 1. Login to HMECloud automatically
-2. Download all 6 store reports
-3. Transform the data
-4. Update your template
-5. Done!
+2. Download the report
+3. Format it using DT macro
+4. Process the data
 
 ---
 

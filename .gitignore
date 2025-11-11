@@ -5,7 +5,7 @@ __pycache__/
 /data/downloads/
 
 # Excel template (handled manually)
-/data/templates/Drive Thru Optimization - KFC Guyana  (16-10)-copy.xlsx
+/templates/Drive Thru Optimization - KFC Guyana  (16-10)-copy (1).xlsx
 
 # Environment files
 .env
