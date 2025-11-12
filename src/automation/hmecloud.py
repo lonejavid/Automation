@@ -13,15 +13,18 @@ Or import and use:
 import os
 import time
 from datetime import datetime, timedelta
+from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import Select
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 from selenium.webdriver.common.keys import Keys
 from pathlib import Path
+
+from .run_macro import process_all_downloads
 
 # ========== CONFIGURATION ==========
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -35,12 +38,11 @@ PASSWORD = "Kfcguy123!@#"
 
 # Store list from HMECloud
 STORES = [
-    "(Ungrouped) 2 Vlissengen Road – KFC",
+    "(Ungrouped) 2 Vlissengen Road - KFC",
     "(Ungrouped) 5 Mandela - KFC",
-    "(Ungrouped) Movie Towne - KFC",
-    "(Ungrouped) Giftland Mall - KFC",
-    "(Ungrouped) Sheriff Street - KFC",
-    "(Ungrouped) Providence - KFC"
+    "(Ungrouped) 6 Movie Towne - KFC",
+    "(Ungrouped) 8 Parika - KFC",
+    "(Ungrouped) 9 Amazonia - KFC",
 ]
 
 # Default date: yesterday
@@ -79,6 +81,136 @@ def setup_chrome_driver(download_path=None):
     
     driver = webdriver.Chrome(options=options)
     return driver
+
+
+def get_latest_download_timestamp(download_directory: str) -> float:
+    downloads_dir = Path(download_directory)
+    if not downloads_dir.exists():
+        return 0.0
+    timestamps = []
+    for pattern in ("*.xlsx", "*.xls"):
+        timestamps.extend([file_path.stat().st_mtime for file_path in downloads_dir.glob(pattern)])
+    return max(timestamps, default=0.0)
+
+
+def wait_for_new_download(after_timestamp: float, download_directory: str, timeout: int = 180):
+    """
+    Wait for a new Excel file to appear in the download directory after the given timestamp.
+    Returns the Path to the newly downloaded file, or None if timeout occurs.
+    """
+    downloads_dir = Path(download_directory)
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"      ⏳ Waiting for downloaded file to appear in {downloads_dir}...")
+    end_time = time.time() + timeout
+
+    latest_file = None
+    while time.time() < end_time:
+        partial_downloads = list(downloads_dir.glob("*.crdownload"))
+        if partial_downloads:
+            time.sleep(2)
+            continue
+
+        candidate_files = []
+        for pattern in ("*.xlsx", "*.xls"):
+            candidate_files.extend(downloads_dir.glob(pattern))
+
+        if candidate_files:
+            latest_candidate = max(candidate_files, key=lambda p: p.stat().st_mtime)
+            if latest_candidate.stat().st_mtime > after_timestamp:
+                latest_file = latest_candidate
+                break
+
+        time.sleep(2)
+
+    if latest_file:
+        print(f"      ✅ Detected new download: {latest_file.name}")
+        return latest_file
+
+    print("      ⚠️  No new download detected within timeout window.")
+    return None
+
+
+def open_export_dropdown(driver, wait: WebDriverWait) -> Optional[object]:
+    """
+    Attempt to open the Export dropdown within the report iframe.
+    Returns the menu container element if successful, otherwise None.
+    """
+    export_selectors = [
+        (By.CSS_SELECTOR, "button[data-testid='toolbar-export-dropdown']"),
+        (By.XPATH, "//button[@data-testid='toolbar-export-dropdown']"),
+        (By.XPATH, "//button[@title='Export']"),
+        (By.XPATH, "//button[contains(@class, 'ms-CommandBarItem')]//span[text()='Export']/ancestor::button"),
+        (By.XPATH, "//span[normalize-space(text())='Export']/ancestor::button"),
+        (By.XPATH, "//button[.//span[contains(@class,'commandBarItemLabel') and normalize-space()='Export']]"),
+    ]
+
+    for attempt in range(1, 6):
+        export_button = None
+        for selector_type, selector_value in export_selectors:
+            try:
+                export_button = wait.until(
+                    EC.presence_of_element_located((selector_type, selector_value))
+                )
+                break
+            except TimeoutException:
+                continue
+
+        if export_button is None:
+            print(f"      ⚠️  Could not find Export button (attempt {attempt}/5)")
+            time.sleep(2)
+            continue
+
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", export_button)
+        except Exception:
+            pass
+
+        time.sleep(0.5)
+        try:
+            driver.execute_script("arguments[0].focus();", export_button)
+        except Exception:
+            pass
+
+        clicked = False
+        try:
+            driver.execute_script("arguments[0].click();", export_button)
+            clicked = True
+        except Exception as js_err:
+            print(f"         ⚠️ JavaScript click failed: {js_err}")
+
+        if not clicked:
+            try:
+                export_button.click()
+                clicked = True
+            except Exception as normal_err:
+                print(f"         ⚠️ Direct click failed: {normal_err}")
+
+        if not clicked:
+            try:
+                ActionChains(driver).move_to_element(export_button).pause(0.2).click().perform()
+                clicked = True
+            except Exception as chain_err:
+                print(f"         ⚠️ ActionChains click failed: {chain_err}")
+
+        if not clicked:
+            print(f"      ⚠️  Unable to trigger Export button (attempt {attempt}/5); retrying...")
+            time.sleep(2)
+            continue
+
+        time.sleep(1.5)
+        try:
+            menu_container = wait.until(
+                EC.presence_of_element_located((By.XPATH, "//div[@role='menu' or contains(@class, 'commandBarMenu')]"))
+            )
+            print(f"      ✅ Export menu opened (attempt {attempt}/5)")
+            return menu_container
+        except TimeoutException:
+            print(f"      ⚠️  Export menu not detected after clicking (attempt {attempt}/5)")
+            time.sleep(2)
+
+    print("      ❌ Export dropdown did not open after multiple attempts")
+    return None
 
 
 def login_to_hmecloud(driver, username=USERNAME, password=PASSWORD):
@@ -327,34 +459,93 @@ def select_store_and_date(driver, store_name, report_date=None):
     
     try:
         wait = WebDriverWait(driver, 20)
+
+        def wait_for_parameter_spinner(context: str = ""):
+            spinner_selector = (By.CSS_SELECTOR, "div.parameters-spinner-overlay[data-testid='spinner']")
+            timeout_seconds = 120
+            poll_interval = 1.0
+            elapsed = 0.0
+
+            while elapsed < timeout_seconds:
+                visible_spinners = []
+                for spinner in driver.find_elements(*spinner_selector):
+                    try:
+                        if spinner.is_displayed():
+                            visible_spinners.append(spinner)
+                    except StaleElementReferenceException:
+                        continue
+
+                if not visible_spinners:
+                    if context:
+                        print(context)
+                    time.sleep(0.5)
+                    return True
+
+                if int(elapsed) % 10 == 0:
+                    print(f"      ⏳ Waiting for parameter spinner... ({int(elapsed)}s elapsed)")
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+
+            print("      ⚠️  Parameter spinner still visible after extended wait; continuing cautiously.")
+            return False
         
-        # IMPORTANT: Switch to NESTED iframes (PowerBI uses double-iframe structure)
-        print(f"      Looking for iframe...")
-        time.sleep(3)  # Wait for page to load
-        
-        try:
-            # Find the first PowerBI iframe
-            iframe1 = wait.until(
-                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-            )
-            print(f"      ✅ Found first iframe, switching to it...")
-            driver.switch_to.frame(iframe1)
-            print(f"      ⏳ Waiting for first iframe to load...")
-            time.sleep(5)  # Wait longer for first iframe to load
-            
-            # Now find the NESTED iframe inside
-            print(f"      Looking for nested iframe...")
-            iframe2 = wait.until(
-                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-            )
-            print(f"      ✅ Found nested iframe, switching to it...")
-            driver.switch_to.frame(iframe2)
-            print(f"      ⏳ Waiting for PowerBI report to fully load...")
-            time.sleep(10)  # Wait even longer for PowerBI report to fully load
-            print(f"      ✅ Switched to nested iframe successfully")
-        except Exception as e:
-            print(f"      ⚠️  Error with iframes: {e}")
-            # Continue anyway
+        def switch_to_powerbi_iframe(context_label: str = "initial") -> bool:
+            print(f"      🔁 Switching to PowerBI iframe ({context_label})...")
+            try:
+                driver.switch_to.default_content()
+            except Exception:
+                pass
+            time.sleep(1.5)
+
+            try:
+                iframe1 = None
+                for attempt in range(3):
+                    try:
+                        iframe1 = wait.until(
+                            EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+                        )
+                        print(f"         ✅ Found outer iframe (attempt {attempt + 1})")
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            print(f"         ⏳ Retrying outer iframe search ({attempt + 1}/3)...")
+                            time.sleep(2)
+                        else:
+                            raise e
+
+                driver.switch_to.frame(iframe1)
+                time.sleep(2)
+
+                iframe2 = None
+                for attempt in range(3):
+                    try:
+                        iframe2 = wait.until(
+                            EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+                        )
+                        print(f"         ✅ Found inner iframe (attempt {attempt + 1})")
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            print(f"         ⏳ Retrying inner iframe search ({attempt + 1}/3)...")
+                            time.sleep(2)
+                        else:
+                            raise e
+
+                driver.switch_to.frame(iframe2)
+                time.sleep(3)
+                print(f"      ✅ Now inside PowerBI iframe ({context_label})")
+                return True
+
+            except Exception as iframe_error:
+                print(f"      ❌ Could not switch to PowerBI iframe ({context_label}): {iframe_error}")
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+                return False
+
+        # Switch into the iframe to start interacting with report
+        switch_to_powerbi_iframe("initial load")
         
         # STEP 1: Select store from dropdown
         print(f"      Finding store dropdown...")
@@ -407,6 +598,11 @@ def select_store_and_date(driver, store_name, report_date=None):
         except Exception as e:
             print(f"      ❌ Could not select store: {e}")
             return False
+
+        store_refresh_complete = wait_for_parameter_spinner("      ✅ Parameters refreshed after store selection")
+        if not store_refresh_complete:
+            print("      ⚠️  Spinner may still be visible; pausing 5 seconds before proceeding...")
+            time.sleep(5)
         
         # STEP 2: Select date from calendar picker
         print(f"      Finding date picker...")
@@ -473,8 +669,10 @@ def select_store_and_date(driver, store_name, report_date=None):
             
             # Wait for other fields to auto-populate
             print(f"      ⏳ Waiting for other fields to auto-populate...")
-            time.sleep(5)  # Wait for Start Time, Stop Time, etc. to fill automatically
-            print(f"      ✅ Other fields should be populated now")
+            fields_populated = wait_for_parameter_spinner("      ✅ Other fields should be populated now")
+            if not fields_populated:
+                print("      ⚠️  Spinner may still be visible; pausing 5 seconds before continuing to buttons...")
+                time.sleep(5)
             
         except Exception as e:
             print(f"      ❌ Could not select date: {e}")
@@ -497,7 +695,7 @@ def select_store_and_date(driver, store_name, report_date=None):
         
         # STEP 3: Click "View Report" button
         print(f"      Waiting before clicking 'View Report'...")
-        time.sleep(2)  # Small wait to ensure form is ready
+        wait_for_parameter_spinner()
         print(f"      Clicking 'View Report' button...")
         
         try:
@@ -548,18 +746,27 @@ def select_store_and_date(driver, store_name, report_date=None):
             # STEP 4: Click "View Report" button (SECOND TIME)
             print(f"      Clicking 'View Report' button (2nd time)...")
             
-            # Find the button again
-            view_report_button_2 = wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-testid='parameter-pane-submit-action']"))
-            )
+            second_click_success = False
+            for attempt in range(1, 4):
+                try:
+                    view_report_button_2 = wait.until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-testid='parameter-pane-submit-action']"))
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView(true);", view_report_button_2)
+                    time.sleep(0.5)
+                    try:
+                        view_report_button_2.click()
+                    except Exception as click_error:
+                        driver.execute_script("arguments[0].click();", view_report_button_2)
+                    print(f"      ✅ Clicked 'View Report' button (2nd time) [attempt {attempt}]")
+                    second_click_success = True
+                    break
+                except Exception as second_click_err:
+                    print(f"      ⚠️  Attempt {attempt} to click 2nd 'View Report' failed: {second_click_err}")
+                    time.sleep(5)
             
-            # Scroll into view
-            driver.execute_script("arguments[0].scrollIntoView(true);", view_report_button_2)
-            time.sleep(0.5)
-            
-            # Click the button (SECOND TIME)
-            view_report_button_2.click()
-            print(f"      ✅ Clicked 'View Report' button (2nd time)")
+            if not second_click_success:
+                print("      ⚠️  Proceeding without second click; report may already be loaded.")
             
             # Wait for "Loading report..." spinner to appear
             print(f"      ⏳ Waiting for 'Loading report...' spinner...")
@@ -588,79 +795,16 @@ def select_store_and_date(driver, store_name, report_date=None):
             print(f"      ⏳ Waiting 15 seconds for data to fully render...")
             time.sleep(15)
             print(f"      ✅ Data should be fully displayed now!")
-            
-            # STEP 5: Click "Export" button (stays in iframe)
-            print(f"      Clicking 'Export' button in toolbar...")
-            
-            export_selectors = [
-                (By.CSS_SELECTOR, "button[data-testid='toolbar-export-dropdown']"),
-                (By.XPATH, "//button[@data-testid='toolbar-export-dropdown']"),
-                (By.XPATH, "//button[@title='Export']"),
-                (By.XPATH, "//button[contains(@class, 'ms-CommandBarItem')]//span[text()='Export']/ancestor::button"),
-                (By.XPATH, "//span[@id and text()='Export']/ancestor::button"),
-            ]
-            
-            export_button = None
-            for selector_type, selector_value in export_selectors:
-                try:
-                    export_button = wait.until(
-                        EC.element_to_be_clickable((selector_type, selector_value))
-                    )
-                    break
-                except Exception:
-                    continue
-            
-            if export_button is None:
-                print(f"      ❌ Could not locate Export dropdown button")
+
+            # Re-enter iframe to ensure we have a fresh reference before clicking Export
+            if not switch_to_powerbi_iframe("before export"):
+                print("      ❌ Unable to re-enter PowerBI iframe before exporting.")
                 return False
-            
-            export_opened = False
-            menu_container = None
-            for attempt in range(1, 6):
-                print(f"      🔄 Attempt {attempt}/5 to open Export dropdown...")
-                try:
-                    ActionChains(driver).move_to_element(export_button).pause(0.2).click().perform()
-                    time.sleep(1.0)
-                except Exception as e:
-                    print(f"         ⚠️ ActionChains click failed: {e}. Trying JavaScript click")
-                    try:
-                        driver.execute_script("arguments[0].click();", export_button)
-                        time.sleep(1.0)
-                    except Exception as e2:
-                        print(f"         ⚠️ JavaScript click also failed: {e2}")
-                
-                # Check for menu inside current iframe
-                try:
-                    menu_container = driver.find_element(By.XPATH, "//div[@role='menu']")
-                    export_opened = True
-                    print(f"         ✅ Export menu detected in iframe")
-                    break
-                except Exception:
-                    pass
-                
-                # Try keyboard activation
-                try:
-                    export_button.send_keys(Keys.ENTER)
-                    time.sleep(1.0)
-                    menu_container = driver.find_element(By.XPATH, "//div[@role='menu']")
-                    export_opened = True
-                    print(f"         ✅ Export menu opened via ENTER")
-                    break
-                except Exception:
-                    pass
-                
-                try:
-                    export_button.send_keys(Keys.SPACE)
-                    time.sleep(1.0)
-                    menu_container = driver.find_element(By.XPATH, "//div[@role='menu']")
-                    export_opened = True
-                    print(f"         ✅ Export menu opened via SPACE")
-                    break
-                except Exception:
-                    pass
-            
-            if not export_opened or menu_container is None:
-                print(f"      ❌ Export dropdown did not open after multiple attempts")
+
+            print(f"      Clicking 'Export' button in toolbar...")
+
+            menu_container = open_export_dropdown(driver, wait)
+            if menu_container is None:
                 return False
             
             # STEP 6: Click "Microsoft Excel (.xlsx)" from dropdown
@@ -693,28 +837,6 @@ def select_store_and_date(driver, store_name, report_date=None):
             time.sleep(10)
             print(f"      ✅ Download complete!")
             print(f"      📥 Excel file saved to downloads folder")
-            
-            # Run DT macro on downloaded file AUTOMATICALLY
-            # This ensures every downloaded file gets the macro applied
-            print(f"\n      " + "="*70)
-            print(f"      🔄 AUTOMATICALLY RUNNING DT MACRO ON DOWNLOADED FILE")
-            print(f"      " + "="*70)
-            try:
-                from .run_macro import process_downloaded_file
-                # Wait for file to finish downloading, then run macro
-                macro_success = process_downloaded_file(wait_for_download=True)
-                if macro_success:
-                    print(f"\n      ✅✅✅ FILE DOWNLOADED AND CONVERTED SUCCESSFULLY! ✅✅✅")
-                else:
-                    print(f"\n      ⚠️  WARNING: File downloaded but macro execution failed")
-                    print(f"      💡 The file is in the downloads folder but needs manual macro execution")
-                    print(f"      📁 Check the downloads folder for the file")
-            except Exception as e:
-                print(f"\n      ❌ ERROR: Could not run macro automatically: {e}")
-                import traceback
-                traceback.print_exc()
-                print(f"      📥 File was downloaded successfully but macro must be run manually")
-                print(f"      📁 File location: {DOWNLOADS_FOLDER}")
             
         except Exception as e:
             print(f"      ❌ Could not click View Report button: {e}")
@@ -763,88 +885,19 @@ def download_store_report(driver, store_name, report_date=None):
     print(f"\n   📥 Downloading: {store_name}")
     print(f"      Date: {report_date.strftime('%Y-%m-%d')}")
     
-    downloads_dir = Path(DOWNLOADS_FOLDER)
-    if downloads_dir.exists():
-        existing_files = sorted(downloads_dir.glob("*.xlsx"))
-        if existing_files:
-            print("   📁 Existing export found in downloads folder")
-            try:
-                from .run_macro import process_downloaded_file
-                print("   🔄 Skipping new download and converting existing file...")
-                if process_downloaded_file(downloads_dir):
-                    print("   ✅ Existing file processed successfully")
-                    return True
-                else:
-                    print("   ⚠️  Existing file conversion failed; continuing with fresh download")
-            except Exception as e:
-                print(f"   ⚠️  Could not process existing file: {e}")
-                print("   🔁 Proceeding with fresh download")
-    
-    try:
-        wait = WebDriverWait(driver, 60)
-        
-        # Select store and date
-        if not select_store_and_date(driver, store_name, report_date):
-            print(f"      ❌ Failed to select store/date for {store_name}")
-            return False
-        
-        # Click "View Report" button
-        print(f"      Clicking 'View Report'...")
-        view_report_clicked = False
-        
-        view_report_selectors = [
-            (By.XPATH, "//button[contains(text(), 'View report')]"),
-            (By.XPATH, "//button[contains(text(), 'View Report')]"),
-            (By.CSS_SELECTOR, "button.view-report"),
-            (By.XPATH, "//button[contains(@class, 'view')]"),
-        ]
-        
-        for selector_type, selector_value in view_report_selectors:
-            try:
-                view_report_btn = wait.until(
-                    EC.element_to_be_clickable((selector_type, selector_value))
-                )
-                view_report_btn.click()
-                print(f"      ✅ Clicked 'View Report'")
-                view_report_clicked = True
-                time.sleep(5)  # Wait for report to load
-                break
-            except:
-                continue
-        
-        if not view_report_clicked:
-            print(f"      ❌ Could not click 'View Report' button")
-            return False
-        
-        # Click "Export" button
-        print(f"      Clicking 'Export'...")
-        export_btn = wait.until(
-            EC.element_to_be_clickable((By.LINK_TEXT, "Export"))
-        )
-        export_btn.click()
-        time.sleep(1)
-        
-        # Click "Microsoft Excel" option
-        print(f"      Selecting 'Microsoft Excel'...")
-        excel_option = wait.until(
-            EC.element_to_be_clickable((By.LINK_TEXT, "Microsoft Excel"))
-        )
-        excel_option.click()
-        
-        # Wait for download to complete
-        time.sleep(5)
-        
-        print(f"      ✅ Downloaded: {store_name}")
-        return True
-        
-    except TimeoutException:
-        print(f"      ❌ Timeout downloading {store_name}")
+    baseline_timestamp = get_latest_download_timestamp(DOWNLOADS_FOLDER)
+    success = select_store_and_date(driver, store_name, report_date)
+
+    if not success:
         return False
-    except Exception as e:
-        print(f"      ❌ Error downloading {store_name}: {e}")
-        import traceback
-        traceback.print_exc()
+
+    downloaded_file = wait_for_new_download(baseline_timestamp, DOWNLOADS_FOLDER)
+    if downloaded_file is None:
+        print(f"      ❌ Download for {store_name} was not detected.")
         return False
+
+    print(f"      📄 File stored as: {downloaded_file.name}")
+    return True
 
 
 def download_all_stores(stores=None, report_date=None, download_path=None):
@@ -868,20 +921,16 @@ def download_all_stores(stores=None, report_date=None, download_path=None):
     print("="*80)
     
     downloads_dir = Path(DOWNLOADS_FOLDER)
-    existing_files = list(downloads_dir.glob("*.xlsx"))
-    if existing_files:
-        print("\n   📁 Existing export detected in downloads folder")
-        try:
-            from .run_macro import process_downloaded_file
-            print("   🔄 Skipping new download and converting existing file...")
-            if process_downloaded_file(downloads_dir):
-                print("   ✅ Existing file processed successfully")
-                return True
-            else:
-                print("   ⚠️  Existing file conversion failed; proceeding to download a fresh copy")
-        except Exception as e:
-            print(f"   ⚠️  Could not process existing file: {e}")
-            print("   🔁 Proceeding with fresh download")
+    if downloads_dir.exists():
+        existing_files = list(downloads_dir.glob("*.xlsx"))
+        if existing_files:
+            print("\n   🧹 Clearing existing exports before download...")
+            for file_path in existing_files:
+                try:
+                    file_path.unlink()
+                    print(f"      • Removed {file_path.name}")
+                except Exception as e:
+                    print(f"      ⚠️  Could not remove {file_path.name}: {e}")
     
     # Setup Chrome driver
     driver = setup_chrome_driver(download_path)
@@ -908,13 +957,26 @@ def download_all_stores(stores=None, report_date=None, download_path=None):
         for i, store in enumerate(stores, 1):
             print(f"\n[{i}/{len(stores)}]")
             
+            # Ensure we're in default content before starting next download
+            try:
+                driver.switch_to.default_content()
+            except:
+                pass
+            
+            # Wait a bit longer between downloads to let the page stabilize
+            if i > 1:
+                print(f"   ⏳ Waiting for page to stabilize before next download...")
+                time.sleep(5)
+            
             if download_store_report(driver, store, report_date):
                 successful_downloads += 1
+                print(f"   ✅ Successfully downloaded: {store}")
             else:
                 failed_downloads.append(store)
+                print(f"   ❌ Failed to download: {store}")
             
-            # Small delay between downloads
-            time.sleep(2)
+            # Additional delay after download to ensure file is saved
+            time.sleep(3)
         
         # Summary
         print("\n" + "="*80)
@@ -930,11 +992,20 @@ def download_all_stores(stores=None, report_date=None, download_path=None):
         print(f"\nFiles saved to: {download_path}")
         print("="*80)
         
+        print("\n" + "="*80)
+        print("🛠️  Running DT macro on downloaded files")
+        print("="*80)
+        macro_success = process_all_downloads(downloads_dir)
+        if macro_success:
+            print("\n✅ All files processed successfully!")
+        else:
+            print("\n⚠️  Some files may require manual review.")
+
         # Keep browser open for a few seconds
         print("\nClosing browser in 5 seconds...")
         time.sleep(5)
         
-        return successful_downloads == len(stores)
+        return successful_downloads == len(stores) and macro_success
         
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
@@ -963,6 +1034,18 @@ def download_single_store(store_name, report_date=None, download_path=None):
     print(f"Download folder: {download_path}")
     print("="*80)
     
+    downloads_dir = Path(DOWNLOADS_FOLDER)
+    if downloads_dir.exists():
+        existing_files = list(downloads_dir.glob("*.xlsx"))
+        if existing_files:
+            print("\n   🧹 Clearing existing exports before download...")
+            for file_path in existing_files:
+                try:
+                    file_path.unlink()
+                    print(f"      • Removed {file_path.name}")
+                except Exception as e:
+                    print(f"      ⚠️  Could not remove {file_path.name}: {e}")
+
     driver = setup_chrome_driver(download_path)
     
     try:
@@ -984,12 +1067,21 @@ def download_single_store(store_name, report_date=None, download_path=None):
             print("✅ DOWNLOAD COMPLETE!")
             print("="*80)
             print(f"File saved to: {download_path}")
+
+            print("\n" + "="*80)
+            print("🛠️  Running DT macro on downloaded file")
+            print("="*80)
+            macro_success = process_all_downloads(downloads_dir)
+            if macro_success:
+                print("\n✅ File processed successfully!")
+            else:
+                print("\n⚠️  File may require manual review.")
         
         # Keep browser open for a few seconds
         print("\nClosing browser in 5 seconds...")
         time.sleep(5)
         
-        return success
+        return success and macro_success
         
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")

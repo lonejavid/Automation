@@ -10,6 +10,8 @@ from pathlib import Path
 import threading
 import time
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+
 # Page config
 st.set_page_config(
     page_title="HME Cloud Automation",
@@ -60,46 +62,51 @@ st.markdown("""
 """)
 
 # Initialize session state
-if 'automation_running' not in st.session_state:
+if "automation_running" not in st.session_state:
     st.session_state.automation_running = False
-if 'automation_status' not in st.session_state:
+if "automation_status" not in st.session_state:
     st.session_state.automation_status = "Ready to start"
-if 'automation_output' not in st.session_state:
+if "automation_output" not in st.session_state:
     st.session_state.automation_output = []
+if "automation_process" not in st.session_state:
+    st.session_state.automation_process = None
 
 def run_automation():
     """Run the automation script in a subprocess"""
     try:
-        st.session_state.automation_status = "🔄 Starting automation..."
         st.session_state.automation_output = []
-        
-        # Get the project root
-        project_root = Path(__file__).parent
-        script_path = project_root / "scripts" / "test_store_selection.py"
-        
-        # Run the automation script
+        script_path = PROJECT_ROOT / "scripts" / "test_store_selection.py"
+        command = [
+            sys.executable,
+            str(script_path),
+            "--mode",
+            "all",
+        ]
+
         process = subprocess.Popen(
-            [sys.executable, str(script_path)],
+            command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
         )
-        
-        # Read output line by line
+
+        st.session_state.automation_process = process
         output_lines = []
-        for line in process.stdout:
-            output_lines.append(line.strip())
-            st.session_state.automation_output = output_lines[-20:]  # Keep last 20 lines
-        
+        if process.stdout:
+            for line in process.stdout:
+                output_lines.append(line.rstrip())
+                st.session_state.automation_output = output_lines[-30:]
+
         process.wait()
-        
+        st.session_state.automation_process = None
+
         if process.returncode == 0:
             st.session_state.automation_status = "✅ Automation completed successfully!"
         else:
-            st.session_state.automation_status = "❌ Automation completed with errors"
-            
+            st.session_state.automation_status = "❌ Automation completed with errors."
+
     except Exception as e:
         st.session_state.automation_status = f"❌ Error: {str(e)}"
     finally:
@@ -107,10 +114,14 @@ def run_automation():
 
 def start_automation():
     """Start the automation in a background thread"""
-    if not st.session_state.automation_running:
-        st.session_state.automation_running = True
-        thread = threading.Thread(target=run_automation, daemon=True)
-        thread.start()
+    if st.session_state.automation_running:
+        return
+
+    st.session_state.automation_running = True
+    st.session_state.automation_status = "🔄 Starting automation..."
+
+    thread = threading.Thread(target=run_automation, daemon=True)
+    thread.start()
 
 # Status display
 status_container = st.container()

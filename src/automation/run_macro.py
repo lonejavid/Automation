@@ -669,6 +669,49 @@ def process_downloaded_file(downloads_folder=None, wait_for_download=True):
         return False
 
 
+def process_all_downloads(downloads_folder=None, wait_for_download=True):
+    """
+    Run the DT macro on every Excel file found in the downloads folder.
+    """
+    if downloads_folder is None:
+        BASE_DIR = Path(__file__).resolve().parents[2]
+        downloads_folder = BASE_DIR / "data" / "downloads"
+
+    downloads_path = Path(downloads_folder)
+
+    if not downloads_path.exists():
+        print(f"   ❌ Downloads folder does not exist: {downloads_path}")
+        return False
+
+    excel_files = sorted(downloads_path.glob("*.xlsx"), key=lambda p: p.stat().st_mtime)
+
+    if not excel_files:
+        print("   ❌ No Excel files found in downloads folder")
+        return False
+
+    overall_success = True
+
+    print("\n" + "="*80)
+    print(f"📂 Processing {len(excel_files)} downloaded file(s)")
+    print("="*80)
+
+    for file_path in excel_files:
+        file_str = str(file_path)
+        print(f"\n   📄 Processing: {file_path.name}")
+
+        if wait_for_download:
+            if wait_for_file_download(file_str, max_wait=60):
+                print("      ✅ File download complete")
+            else:
+                print("      ⚠️  File may still be downloading; proceeding with caution...")
+
+        success = run_dt_macro(file_str)
+        if not success:
+            overall_success = False
+
+    return overall_success
+
+
 if __name__ == "__main__":
     process_downloaded_file()
 
