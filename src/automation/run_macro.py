@@ -8,6 +8,8 @@ import glob
 import sys
 import subprocess
 import time
+import shutil
+import re
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -82,6 +84,10 @@ DT_MACRO_CODE = """Sub DT()
     Columns("J:K").Delete Shift:=xlToLeft
 End Sub
 """
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+TEMPLATE_FILE = BASE_DIR / "templates" / "Drive Thru Optimization - KFC Guyana  (16-10)-copy (1).xlsx"
+TEMPLATE_OUTPUT_DIR = BASE_DIR / "data" / "template_outputs"
 
 def open_excel_file(excel_file_path):
     """Open the Excel workbook in the system's default spreadsheet application."""
@@ -639,6 +645,102 @@ def run_dt_macro_python_logic(excel_file_path, wb=None, ws=None):
         return False
 
 
+def safe_sheet_name(raw_name: str) -> str:
+    if not raw_name:
+        return "AutomationData"
+    sanitized = re.sub(r"[\\/*?:\[\]]", " ", raw_name).strip()
+    if not sanitized:
+        sanitized = "AutomationData"
+    return sanitized[:31]
+
+
+def extract_store_name(formatted_file_path: str) -> str:
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(formatted_file_path, read_only=True, data_only=True)
+        ws = wb.active
+        candidate = ws["B2"].value or ws["B1"].value
+        wb.close()
+        if isinstance(candidate, str):
+            return candidate.strip()
+        return ""
+    except Exception:
+        return ""
+
+
+def copy_formatted_data_to_template(formatted_file_path: str, shared_app=None) -> bool:
+    if not TEMPLATE_FILE.exists():
+        print(f"   ⚠️  Template file not found at {TEMPLATE_FILE}. Skipping template copy.")
+        return False
+
+    TEMPLATE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    store_name = extract_store_name(formatted_file_path)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    store_segment = re.sub(r"[^A-Za-z0-9]+", "_", store_name or Path(formatted_file_path).stem).strip("_")
+    output_name = f"{store_segment or 'Store'}_{timestamp}_DriveThru.xlsx"
+    destination_path = TEMPLATE_OUTPUT_DIR / output_name
+
+    try:
+        shutil.copyfile(TEMPLATE_FILE, destination_path)
+        print(f"   📁 Template copied to: {destination_path.name}")
+    except Exception as copy_error:
+        print(f"   ❌ Unable to copy template: {copy_error}")
+        return False
+
+    try:
+        import xlwings as xw  # type: ignore
+    except ImportError:
+        print("   ⚠️  xlwings not available; cannot copy into template automatically.")
+        return False
+
+    app_provided = shared_app is not None
+    app = shared_app or xw.App(visible=True)
+
+    try:
+        abs_formatted = os.path.abspath(formatted_file_path)
+        data_wb = next((book for book in app.books if book.fullname == abs_formatted), None)
+        if data_wb is None:
+            data_wb = app.books.open(abs_formatted, read_only=False)
+
+        destination_wb = next((book for book in app.books if book.fullname == str(destination_path)), None)
+        if destination_wb is None:
+            destination_wb = app.books.open(str(destination_path), read_only=False)
+
+        data_sheet = data_wb.sheets[0]
+        used_range = data_sheet.used_range
+        data_values = used_range.value
+
+        sheet_name = safe_sheet_name(store_name or Path(formatted_file_path).stem)
+
+        if sheet_name in [sht.name for sht in destination_wb.sheets]:
+            target_sheet = destination_wb.sheets[sheet_name]
+            target_sheet.clear()
+        else:
+            target_sheet = destination_wb.sheets.add(sheet_name)
+
+        target_sheet.range("A1").value = data_values
+        destination_wb.save()
+        print(f"   ✅ Copied formatted data into template sheet '{sheet_name}'")
+        print(f"   📂 Template workbook left open for review: {destination_path}")
+        return True
+    except Exception as template_error:
+        print(f"   ❌ Failed to copy data into template: {template_error}")
+        import traceback
+        traceback.print_exc()
+        try:
+            os.remove(destination_path)
+        except Exception:
+            pass
+        return False
+    finally:
+        if not app_provided:
+            try:
+                app.visible = True
+            except Exception:
+                pass
+
+
 def process_downloaded_file(downloads_folder=None, wait_for_download=True):
     """
     Find latest downloaded file and run DT macro on it automatically
@@ -767,6 +869,10 @@ def process_all_downloads(downloads_folder=None, wait_for_download=True):
         success = run_dt_macro(file_str, app=shared_app)
         if not success:
             overall_success = False
+        else:
+            template_success = copy_formatted_data_to_template(file_str, shared_app=shared_app)
+            if not template_success:
+                overall_success = False
 
     if shared_app is not None:
         print("\n   🪟 Excel window(s) remain open for review. Close manually when finished.")
