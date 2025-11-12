@@ -559,44 +559,77 @@ def select_store_and_date(driver, store_name, report_date=None):
         try:
             # Find the store input by ID
             store_input = wait.until(
-                EC.presence_of_element_located((By.ID, "P_STORE_ID-input"))
+                EC.element_to_be_clickable((By.ID, "P_STORE_ID-input"))
             )
             print(f"      ✅ Found store input field")
             
             # Scroll into view
-            driver.execute_script("arguments[0].scrollIntoView(true);", store_input)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", store_input)
+            time.sleep(0.3)
+
+            # Ensure any previous value is cleared by clicking and selecting all
+            dropdown_opened = False
+            for attempt in range(1, 4):
+                try:
+                    store_input = wait.until(
+                        EC.element_to_be_clickable((By.ID, "P_STORE_ID-input"))
+                    )
+                    driver.execute_script("arguments[0].focus();", store_input)
+                    driver.execute_script("arguments[0].click();", store_input)
+                    time.sleep(0.3)
+                    ActionChains(driver).move_to_element(store_input).pause(0.1).click().perform()
+                    time.sleep(0.3)
+                    store_input.send_keys(Keys.CONTROL, "a")
+                    store_input.send_keys(Keys.DELETE)
+                    dropdown_opened = True
+                    break
+                except Exception as click_error:
+                    print(f"         ⚠️ Attempt {attempt} to focus store input failed: {click_error}")
+                    time.sleep(1)
+            
+            if not dropdown_opened:
+                print("      ❌ Unable to focus store dropdown input")
+                return False
+            
+            # Wait briefly for the combobox options to be ready
             time.sleep(0.5)
             
-            # Click to open dropdown
-            store_input.click()
-            print(f"      ✅ Clicked store dropdown")
+            # Type the store name with retries to handle transient focus issues
+            print(f"      Typing store name: '{store_name}'...")
+            store_selected = False
+            for attempt in range(1, 4):
+                try:
+                    store_input = wait.until(
+                        EC.element_to_be_clickable((By.ID, "P_STORE_ID-input"))
+                    )
+                    store_input.send_keys(store_name)
+                    time.sleep(1.0)
+                    store_input.send_keys(Keys.ENTER)
+                    print(f"      ✅ Store selected: {store_name} (attempt {attempt})")
+                    store_selected = True
+                    break
+                except Exception as type_error:
+                    print(f"         ⚠️ Attempt {attempt} to select store failed: {type_error}")
+                    time.sleep(1.5)
+                    # Clear and retry
+                    try:
+                        store_input = wait.until(
+                            EC.element_to_be_clickable((By.ID, "P_STORE_ID-input"))
+                        )
+                        store_input.send_keys(Keys.CONTROL, "a")
+                        store_input.send_keys(Keys.DELETE)
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
+            
+            if not store_selected:
+                print(f"      ❌ Could not select store after multiple attempts")
+                return False
+            
             dropdown_found = True
-            time.sleep(1.5)
             
         except Exception as e:
-            print(f"      ❌ Could not find store dropdown: {e}")
-            return False
-        
-        # Type the store name into the input field (Fluent UI autocomplete)
-        print(f"      Typing store name: '{store_name}'...")
-        
-        try:
-            # Clear the field first
-            store_input.clear()
-            time.sleep(0.5)
-            
-            # Type the store name
-            store_input.send_keys(store_name)
-            print(f"      ✅ Typed store name")
-            time.sleep(2)  # Wait for autocomplete to show
-            
-            # Press Enter or click on the matching option
-            store_input.send_keys(Keys.ENTER)
-            print(f"      ✅ Store selected: {store_name}")
-            time.sleep(1)
-            
-        except Exception as e:
-            print(f"      ❌ Could not select store: {e}")
+            print(f"      ❌ Could not interact with store dropdown: {e}")
             return False
 
         store_refresh_complete = wait_for_parameter_spinner("      ✅ Parameters refreshed after store selection")
@@ -992,14 +1025,18 @@ def download_all_stores(stores=None, report_date=None, download_path=None):
         print(f"\nFiles saved to: {download_path}")
         print("="*80)
         
-        print("\n" + "="*80)
-        print("🛠️  Running DT macro on downloaded files")
-        print("="*80)
-        macro_success = process_all_downloads(downloads_dir)
-        if macro_success:
-            print("\n✅ All files processed successfully!")
+        macro_success = False
+        if successful_downloads > 0:
+            print("\n" + "="*80)
+            print("🛠️  Running DT macro on downloaded files")
+            print("="*80)
+            macro_success = process_all_downloads(downloads_dir)
+            if macro_success:
+                print("\n✅ All files processed successfully!")
+            else:
+                print("\n⚠️  Some files may require manual review.")
         else:
-            print("\n⚠️  Some files may require manual review.")
+            print("\n⚠️  No files were downloaded successfully; skipping macro execution.")
 
         # Keep browser open for a few seconds
         print("\nClosing browser in 5 seconds...")
@@ -1061,6 +1098,7 @@ def download_single_store(store_name, report_date=None, download_path=None):
         
         # Download the store
         success = download_store_report(driver, store_name, report_date)
+        macro_success = False
         
         if success:
             print("\n" + "="*80)

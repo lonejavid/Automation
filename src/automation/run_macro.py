@@ -336,7 +336,7 @@ def run_dt_macro_excel_actions(excel_file_path):
                 pass
 
 
-def run_dt_macro(excel_file_path):
+def run_dt_macro(excel_file_path, app=None):
     """
     Run the DT macro on the Excel file using xlwings
     
@@ -346,17 +346,26 @@ def run_dt_macro(excel_file_path):
     Returns:
         True if successful, False otherwise
     """
+    app_provided = app is not None
+    wb = None
+
     try:
         import xlwings as xw
         
         print(f"\n📝 Opening Excel file: {os.path.basename(excel_file_path)}")
         
-        # Open Excel file and keep the window visible for the user
-        app = xw.App(visible=True)
+        if not app_provided:
+            app = xw.App(visible=True)
+        try:
+            app.visible = True
+        except Exception:
+            pass
         
-        # Disable alerts to prevent popups
-        app.api.DisplayAlerts = False
-        app.api.ScreenUpdating = True
+        try:
+            app.api.DisplayAlerts = False
+            app.api.ScreenUpdating = True
+        except Exception:
+            pass
         
         # Open workbook
         try:
@@ -364,7 +373,11 @@ def run_dt_macro(excel_file_path):
         except Exception as e:
             print(f"   ⚠️  Could not open file with xlwings: {e}")
             print("   🔄 Falling back to Python logic...")
-            app.quit()
+            if not app_provided:
+                try:
+                    app.quit()
+                except Exception:
+                    pass
             return run_dt_macro_python_logic(excel_file_path)
         
         # Ensure edit mode
@@ -416,7 +429,14 @@ def run_dt_macro(excel_file_path):
                 print(f"   ⚠️  Could not save automatically: {save_error}")
                 print("   📝 File is open in Excel - please save manually if needed")
             
-            # Keep workbook and Excel window open for the user
+            try:
+                wb.activate()
+            except Exception:
+                try:
+                    wb.api.Activate()
+                except Exception:
+                    pass
+            
             print("   📂 Excel workbook left open for review")
             
             print("\n" + "="*80)
@@ -430,21 +450,30 @@ def run_dt_macro(excel_file_path):
             print("   ⚠️  DT macro could not be executed via Excel.")
             print("   🔄 Trying Excel automation sequence as fallback...")
             try:
-                wb.close()
-            except:
+                if wb is not None:
+                    wb.close()
+            except Exception:
                 pass
-            app.quit()
+            if not app_provided:
+                try:
+                    app.quit()
+                except Exception:
+                    pass
             excel_actions_success = run_dt_macro_excel_actions(excel_file_path)
             if excel_actions_success:
                 return True
             print("   🔄 Replicating macro logic in Python...")
             try:
-                wb.close()
-            except:
+                if wb is not None:
+                    wb.close()
+            except Exception:
                 pass
-            app.quit()
+            if not app_provided:
+                try:
+                    app.quit()
+                except Exception:
+                    pass
             return run_dt_macro_python_logic(excel_file_path)
-        
     except ImportError:
         print("   ⚠️  xlwings not installed. Replicating macro logic in Python...")
         return run_dt_macro_python_logic(excel_file_path)
@@ -453,13 +482,15 @@ def run_dt_macro(excel_file_path):
         import traceback
         traceback.print_exc()
         try:
-            wb.close()
-        except:
+            if wb is not None:
+                wb.close()
+        except Exception:
             pass
-        try:
-            app.quit()
-        except:
-            pass
+        if app is not None and not app_provided:
+            try:
+                app.quit()
+            except Exception:
+                pass
         print("   🔄 Falling back to Python logic...")
         return run_dt_macro_python_logic(excel_file_path)
 
@@ -691,6 +722,34 @@ def process_all_downloads(downloads_folder=None, wait_for_download=True):
 
     overall_success = True
 
+    shared_app = None
+    try:
+        import xlwings as xw  # type: ignore
+
+        existing_apps = list(xw.apps)
+        if existing_apps:
+            shared_app = existing_apps[0]
+            try:
+                shared_app.visible = True
+            except Exception:
+                pass
+            print("   🟢 Reusing existing Excel instance for macro processing.")
+        else:
+            shared_app = xw.App(visible=True)
+            print("   🟢 Launched Excel for macro processing.")
+
+        try:
+            shared_app.api.DisplayAlerts = False
+            shared_app.api.ScreenUpdating = True
+        except Exception:
+            pass
+    except ImportError:
+        print("   ℹ️  xlwings not available; will use Python fallback if needed.")
+        shared_app = None
+    except Exception as app_error:
+        print(f"   ⚠️  Could not prepare shared Excel instance: {app_error}")
+        shared_app = None
+
     print("\n" + "="*80)
     print(f"📂 Processing {len(excel_files)} downloaded file(s)")
     print("="*80)
@@ -705,9 +764,12 @@ def process_all_downloads(downloads_folder=None, wait_for_download=True):
             else:
                 print("      ⚠️  File may still be downloading; proceeding with caution...")
 
-        success = run_dt_macro(file_str)
+        success = run_dt_macro(file_str, app=shared_app)
         if not success:
             overall_success = False
+
+    if shared_app is not None:
+        print("\n   🪟 Excel window(s) remain open for review. Close manually when finished.")
 
     return overall_success
 
